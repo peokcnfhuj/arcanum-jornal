@@ -456,6 +456,7 @@
       .gate-link:hover{ color:var(--gold-soft); }
       .gate-intro{ color:var(--ink-dim); font-size:.98rem; margin:0 0 16px; }
       .gate-note{ color:var(--silver); font-size:.9rem; font-style:italic; margin:18px auto 0; max-width:440px; }
+      .gate-back{ text-align:center; margin:16px 0 0; }
       .gate-credit{
         font-family:"Archivo", sans-serif; font-size:.72rem; letter-spacing:.18em; text-transform:uppercase;
         color:var(--silver); margin-top:26px;
@@ -522,7 +523,7 @@
     </style>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   </head>
-  <body class="locked">
+  <body>
     <!-- ============ PORTÃO DE ACESSO ============ -->
     <div class="gate" id="gate" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
       <div class="gate-card">
@@ -607,7 +608,8 @@
             </form>
           </div>
 
-          <p class="gate-note">O jornal é exclusivo para leitores com conta: notícias, os artigos completos, Astrologia &amp; Lua, eventos e a Biblioteca abrem só depois de entrar.</p>
+          <p class="gate-back"><button class="gate-link" type="button" id="gateBack">← Voltar ao jornal sem entrar</button></p>
+          <p class="gate-note">A capa, as manchetes, Astrologia &amp; Lua, os eventos e a Biblioteca são abertos a todos. Para ler as notícias e os artigos completos, favoritar e continuar a leitura de onde parou, entre ou crie a sua conta.</p>
           <p class="gate-credit">Feito pela <b>PVSR HOLDING TECH</b></p>
         </div>
       </div>
@@ -651,10 +653,13 @@
       </nav>
 
       <div class="acctbar" id="acctbar">
-        <span class="acct-who">Leitor conectado: <b id="acctEmail"></b></span>
+        <span class="acct-who" id="acctWhoGuest">Você está lendo como visitante. <b>Entre ou crie a sua conta</b> para ler os textos completos, favoritar e guardar o seu progresso.</span>
+        <span class="acct-who hidden" id="acctWhoUser">Leitor conectado: <b id="acctEmail"></b></span>
         <span class="acct-actions">
-          <button class="acct-btn" id="btnAccount" type="button">Minha conta</button>
-          <button class="acct-btn ghost" id="btnLogout" type="button">Sair</button>
+          <button class="acct-btn" id="btnLoginBar" type="button">Entrar</button>
+          <button class="acct-btn ghost" id="btnSignupBar" type="button">Criar conta</button>
+          <button class="acct-btn hidden" id="btnAccount" type="button">Minha conta</button>
+          <button class="acct-btn ghost hidden" id="btnLogout" type="button">Sair</button>
         </span>
       </div>
 
@@ -8994,9 +8999,16 @@
         /* ---------- favoritos (captura: antes do clique que abre o artigo) ---------- */
         document.addEventListener("click", function (e) {
           var fb = e.target.closest("[data-fav]");
-          if (fb) { e.stopPropagation(); e.preventDefault(); toggleFav(fb.getAttribute("data-fav")); return; }
+          if (fb) {
+            e.stopPropagation(); e.preventDefault();
+            if (window.ArcanumGate && window.ArcanumGate.guest()) { window.ArcanumGate.askLogin({ fav: fb.getAttribute("data-fav") }); return; }
+            toggleFav(fb.getAttribute("data-fav")); return;
+          }
           var rf = e.target.closest("#readerFav");
-          if (rf && currentId) { toggleFav(currentId); return; }
+          if (rf && currentId) {
+            if (window.ArcanumGate && window.ArcanumGate.guest()) { window.ArcanumGate.askLogin({ fav: currentId }); return; }
+            toggleFav(currentId); return;
+          }
           var op = e.target.closest("[data-open]");
           if (op) { trackOpen(op.getAttribute("data-open")); return; }
           if (e.target.closest("#readerBack")) { trackClose(); }
@@ -9128,14 +9140,19 @@
           $("tabSignup").setAttribute("aria-pressed", view === "formSignup" ? "true" : "false");
           gateCheck.classList.add("hidden");
           gateForms.classList.remove("hidden");
-        }
-        function gateReady() {
-          gateCheck.classList.add("hidden");
-          gateForms.classList.remove("hidden");
-          if (!sb) showMsg("msgLogin", "Não foi possível carregar o sistema de contas. Verifique a sua conexão e recarregue a página.", false);
+          $("gateBack").classList.toggle("hidden", view === "formNewPass");
         }
 
         /* ---------- abrir e fechar o jornal ---------- */
+        function setAcctBar() {
+          var guest = !user;
+          $("acctWhoGuest").classList.toggle("hidden", !guest);
+          $("acctWhoUser").classList.toggle("hidden", guest);
+          $("btnLoginBar").classList.toggle("hidden", !guest);
+          $("btnSignupBar").classList.toggle("hidden", !guest);
+          $("btnAccount").classList.toggle("hidden", guest);
+          $("btnLogout").classList.toggle("hidden", guest);
+        }
         function unlock() {
           body.classList.remove("locked");
           gate.classList.add("hidden");
@@ -9143,17 +9160,69 @@
             $("acctEmail").textContent = user.email || "";
             $("accountEmail").textContent = user.email || "";
           }
+          setAcctBar();
+          runPending();
         }
-        function lockUI() {
+        /* Visitante: a capa fica aberta; só a leitura pede conta. */
+        function enterGuest() {
           user = null;
           remoteFavs = {};
           remoteProg = {};
+          pendingAction = null;
           closeAccount();
+          body.classList.remove("locked");
+          gate.classList.add("hidden");
+          setAcctBar();
+        }
+        /* Pede login/cadastro e, ao entrar, volta direto ao que a pessoa queria fazer. */
+        var pendingAction = null;
+        function promptLogin(action, view) {
+          pendingAction = action || null;
           body.classList.add("locked");
           gate.classList.remove("hidden");
-          showGate("formLogin");
+          showGate(view === "formSignup" ? "formSignup" : "formLogin");
           window.scrollTo({ top: 0 });
+          if (!sb) showMsg(view === "formSignup" ? "msgSignup" : "msgLogin", "Não foi possível carregar o sistema de contas. Verifique a sua conexão e recarregue a página.", false);
         }
+        function runPending() {
+          var p = pendingAction;
+          pendingAction = null;
+          if (!p || !user) return;
+          if (p.open) {
+            var el = document.querySelector('[data-open="' + p.open + '"]');
+            if (el) el.click();
+          } else if (p.fav) {
+            var fb = document.querySelector('[data-fav="' + p.fav + '"]') || $("readerFav");
+            if (fb) fb.click();
+          } else if (p.account) {
+            openAccount();
+          }
+        }
+        window.ArcanumGate = {
+          guest: function () { return !user; },
+          askLogin: function (action) { promptLogin(action); }
+        };
+
+        /* ---------- leitura só com conta: o clique para ler pede login antes de abrir ---------- */
+        document.addEventListener("click", function (e) {
+          if (user || recoveryMode) return;
+          var t = e.target.closest("[data-open]");
+          if (t) { e.preventDefault(); e.stopPropagation(); promptLogin({ open: t.getAttribute("data-open") }); }
+        }, true);
+        document.addEventListener("keydown", function (e) {
+          if (user || recoveryMode) return;
+          if ((e.key === "Enter" || e.key === " ") && document.activeElement && document.activeElement.hasAttribute("data-open")) {
+            e.preventDefault(); e.stopPropagation();
+            promptLogin({ open: document.activeElement.getAttribute("data-open") });
+          }
+        }, true);
+        document.addEventListener("keydown", function (e) {
+          if (e.key === "Escape" && !user && !recoveryMode && body.classList.contains("locked")) {
+            pendingAction = null;
+            body.classList.remove("locked");
+            gate.classList.add("hidden");
+          }
+        });
 
         /* ---------- sincronização com as tabelas favorites e reading_progress ----------
            Esquema real do projeto (o mesmo da Biblioteca): favorites(user_id, book) e
@@ -9253,6 +9322,13 @@
           showGate("formReset");
         });
         $("linkBackLogin").addEventListener("click", function () { showGate("formLogin"); });
+        $("gateBack").addEventListener("click", function () {
+          pendingAction = null;
+          body.classList.remove("locked");
+          gate.classList.add("hidden");
+        });
+        $("btnLoginBar").addEventListener("click", function () { promptLogin(null); });
+        $("btnSignupBar").addEventListener("click", function () { promptLogin(null, "formSignup"); });
 
         $("formLogin").addEventListener("submit", function (e) {
           e.preventDefault();
@@ -9329,7 +9405,8 @@
         function doLogout() {
           closeAccount();
           if (sb) { sb.auth.signOut().catch(function () {}); }
-          lockUI();
+          enterGuest();
+          window.scrollTo({ top: 0 });
         }
         $("btnLogout").addEventListener("click", doLogout);
         $("btnLogout2").addEventListener("click", doLogout);
@@ -9382,7 +9459,10 @@
           var reader = $("reader");
           if (!reader || !reader.classList.contains("open")) capa.classList.remove("hidden");
         }
-        $("btnAccount").addEventListener("click", openAccount);
+        $("btnAccount").addEventListener("click", function () {
+          if (!user) { promptLogin({ account: true }); return; }
+          openAccount();
+        });
         $("accountBack").addEventListener("click", function () { closeAccount(); window.scrollTo({ top: 0, behavior: "instant" }); });
         account.addEventListener("click", function (e) { if (e.target.closest("[data-open]")) closeAccount(); });
         document.querySelectorAll(".chip").forEach(function (chip) {
@@ -9392,7 +9472,15 @@
           if (e.key === "Escape" && account.classList.contains("open")) closeAccount();
         });
 
-        /* ---------- sessão: restaura ao abrir e reage a mudanças ---------- */
+        /* ---------- sessão: conferida em segundo plano, sem travar a página ----------
+           A capa já abriu para todos; aqui só descobrimos se há um leitor conectado.
+           Se a verificação demorar ou falhar, a pessoa segue navegando como visitante. */
+        setAcctBar();
+        if (recoveryMode) {
+          body.classList.add("locked");
+          gate.classList.remove("hidden");
+          showGate("formNewPass");
+        }
         if (sb) {
           sb.auth.onAuthStateChange(function (event, session) {
             if (event === "PASSWORD_RECOVERY") {
@@ -9403,16 +9491,13 @@
               return;
             }
             if (session && session.user) onSignedIn(session.user);
-            else if (event === "SIGNED_OUT") lockUI();
+            else if (event === "SIGNED_OUT") enterGuest();
           });
           sb.auth.getSession().then(function (res) {
             var s = res && res.data ? res.data.session : null;
-            if (s && s.user) { onSignedIn(s.user); return; }
-            if (recoveryMode) { showGate("formNewPass"); return; }
-            gateReady();
-          }).catch(function () { gateReady(); });
-        } else {
-          gateReady();
+            if (s && s.user) onSignedIn(s.user);
+            /* sem sessão: segue como visitante, com a capa aberta */
+          }).catch(function () { /* verificação falhou: a navegação continua normal */ });
         }
       })();
     </script>
