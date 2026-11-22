@@ -1,0 +1,21 @@
+name: Deploy jornal from link
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download jornal HTML
+        run: curl -L -o index.html "https://muse.ai/files/1344024902138601/1169937612557991/jyxmshzmmt8er3sxo1ij1g1e/arcanum-jornal-otimizado.html"
+      - name: Verify size
+        run: ls -la index.html && wc -c index.html
+      - name: Commit
+        run: |
+          git config user.name "peokcnfhuj"
+          git config user.email "peokcnfhuj@users.noreply.github.com"
+          git add index.html
+          git commit -m "Atualizar Arcanum Jornal (nova edição)" || echo "nothing to commit"
+          git push
